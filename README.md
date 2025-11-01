@@ -2,6 +2,8 @@
 
 > Name's inspired by BMO from Adventure Time.
 
+![BMO Screenshot](.screenshots/bmo.png)
+
 A minimal, GPU-accelerated Pomodoro timer built with Rust and GPUI. Named after the friendly little robot from Adventure Time who's always ready to help you stay focused!
 
 ## ⚠️ Work in Progress
