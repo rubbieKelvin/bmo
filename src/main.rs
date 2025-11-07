@@ -39,7 +39,7 @@ fn main() {
         .detach();
 
         cx.open_window(window_options(cx), |_, cx| {
-            cx.new(|cx| app::TimerApp::new(cx))
+            cx.new(|cx| app::BmoApp::new(cx))
         })
         .unwrap();
     });

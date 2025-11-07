@@ -10,6 +10,18 @@ pub struct TimerPreset {
     pub sessions: Vec<Session>,
 }
 
+impl TimerPreset {
+    // the total duration
+    pub fn total_duration(&self) -> Duration {
+        return self
+            .sessions
+            .iter()
+            .map(|i| i.duration)
+            .reduce(|acc, e| acc + e)
+            .unwrap_or_else(|| Duration::from_micros(0));
+    }
+}
+
 impl Default for TimerPreset {
     fn default() -> Self {
         return Self {
