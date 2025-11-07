@@ -7,10 +7,14 @@
 
 // use crate::components::Segment;
 
-use gpui::{AppContext, Context, Entity, ParentElement, Render, Styled, div, white};
+use std::time::Duration;
+
+use gpui::{
+    AppContext, Context, Entity, InteractiveElement, ParentElement, Render, Styled, div, white,
+};
 
 use crate::components::timer::Timer;
-use crate::session::TimerPreset;
+use crate::session::{Session, TimerPreset};
 
 pub struct BmoApp {
     timer: Entity<Timer>,
@@ -30,9 +34,16 @@ impl Render for BmoApp {
     fn render(
         &mut self,
         _window: &mut gpui::Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> impl gpui::IntoElement {
-        return div().bg(white()).child(self.timer.clone());
+        return div().bg(white()).child(self.timer.clone()).on_mouse_up(
+            gpui::MouseButton::Left,
+            cx.listener(|this, event, win, cx| {
+                this.timer.update(cx, |e, cx| {
+                    e.start(&Session::new("title".into(), Duration::from_secs(120)), cx);
+                })
+            }),
+        );
     }
 }
 

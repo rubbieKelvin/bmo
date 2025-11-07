@@ -1,8 +1,10 @@
 use std::time::{Duration, Instant};
 
-use gpui::{Context, ParentElement, Render, Task, div};
+use gpui::{Context, EventEmitter, ParentElement, Render, Task, div};
 
 use crate::session::Session;
+
+pub struct TimerCompletedEvent;
 
 pub struct Timer {
     pub is_running: bool,
@@ -10,6 +12,8 @@ pub struct Timer {
     pub countdown: Duration,
     pub timer_task: Option<Task<()>>,
 }
+
+impl EventEmitter<TimerCompletedEvent> for Timer {}
 
 impl Timer {
     pub fn new() -> Self {
@@ -86,7 +90,7 @@ impl Timer {
                     // at this point, if the countdown is zero
                     // we can call an event
                     if entity.countdown.is_zero() {
-                        // TODO: event?
+                        cx.emit(TimerCompletedEvent);
                     }
 
                     cx.notify();
@@ -108,6 +112,6 @@ impl Render for Timer {
         _window: &mut gpui::Window,
         _cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        return div().child("00:00");
+        return div().child(self.countdown.as_secs().to_string());
     }
 }
