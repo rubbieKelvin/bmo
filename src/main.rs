@@ -14,7 +14,8 @@ fn window_options(cx: &App) -> WindowOptions {
     return WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitlebarOptions {
-            appears_transparent: true,
+            title: Some("Bmo".into()),
+            // appears_transparent: true,
             ..Default::default()
         }),
         ..Default::default()

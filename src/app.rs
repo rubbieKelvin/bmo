@@ -7,18 +7,21 @@
 
 // use crate::components::Segment;
 
-use gpui::{AppContext, Context, Entity, Render, div};
+use gpui::{AppContext, Context, Entity, ParentElement, Render, Styled, div, white};
 
+use crate::components::timer::Timer;
 use crate::session::TimerPreset;
 
 pub struct BmoApp {
-    session: Entity<TimerPreset>,
+    timer: Entity<Timer>,
+    session: TimerPreset,
 }
 
 impl BmoApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         return BmoApp {
-            session: cx.new(|_| TimerPreset::default()),
+            timer: cx.new(|_| Timer::new()),
+            session: TimerPreset::default(),
         };
     }
 }
@@ -26,10 +29,10 @@ impl BmoApp {
 impl Render for BmoApp {
     fn render(
         &mut self,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
+        _window: &mut gpui::Window,
+        _cx: &mut Context<Self>,
     ) -> impl gpui::IntoElement {
-        return div();
+        return div().bg(white()).child(self.timer.clone());
     }
 }
 
