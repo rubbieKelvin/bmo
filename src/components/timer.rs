@@ -6,20 +6,26 @@ use gpui_component::StyledExt;
 use crate::session::Session;
 
 pub struct TimerCompletedEvent;
+pub struct TimerTickEvent {
+    pub percent_completed: f32,
+}
 
 pub struct Timer {
     pub is_running: bool,
+    pub initial_duration: Duration, // just holding how long we started ccounting down from
     // the timer countdown, from the duration to 0
     pub countdown: Duration,
     pub timer_task: Option<Task<()>>,
 }
 
 impl EventEmitter<TimerCompletedEvent> for Timer {}
+impl EventEmitter<TimerTickEvent> for Timer {}
 
 impl Timer {
     pub fn new() -> Self {
         return Self {
             is_running: false,
+            initial_duration: Duration::ZERO,
             countdown: Duration::ZERO,
             timer_task: None,
         };
@@ -36,7 +42,13 @@ impl Timer {
 
     pub fn start(&mut self, session: &Session, cx: &mut Context<Timer>) {
         self.countdown = session.duration.clone();
+        self.initial_duration = session.duration.clone();
         self.is_running = true;
+
+        cx.emit(TimerTickEvent {
+            percent_completed: 0.,
+        });
+
         self.spawn_timer(cx);
     }
 
@@ -87,6 +99,12 @@ impl Timer {
                     } else {
                         entity.countdown -= time_elasped;
                     }
+
+                    cx.emit(TimerTickEvent {
+                        percent_completed: (entity.initial_duration.as_secs_f32()
+                            - entity.countdown.as_secs_f32())
+                            / entity.initial_duration.as_secs_f32(),
+                    });
 
                     // at this point, if the countdown is zero
                     // we can call an event

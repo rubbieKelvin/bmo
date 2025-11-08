@@ -7,7 +7,7 @@ use gpui_component::ActiveTheme as _;
 use gpui_component::TitleBar;
 
 use crate::components::timeline::TimeLine;
-use crate::components::timer::Timer;
+use crate::components::timer::{Timer, TimerCompletedEvent, TimerTickEvent};
 use crate::session::{Session, SessionKind, TimerPreset};
 
 pub struct BmoApp {
@@ -15,15 +15,54 @@ pub struct BmoApp {
     timeline: Entity<TimeLine>,
     session_index: usize,
     preset: TimerPreset,
+    // _subsriptions: Vec<Subscription>,
 }
 
 impl BmoApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let timer = cx.new(|_| Timer::new());
+        let timeline = cx.new(|_| TimeLine::new());
+
+        // update the timeline on every tick
+        cx.subscribe(&timer, {
+            let timeline = timeline.clone();
+            move |_parent, _timer, event: &TimerTickEvent, cx| {
+                let percentage_completed = event.percent_completed;
+                timeline.update(cx, |timeline, _cx| {
+                    timeline.current_progress = percentage_completed;
+                });
+            }
+        })
+        .detach();
+
+        // subscription to check for timer completed event
+        cx.subscribe(&timer, {
+            let timeline = timeline.clone();
+            move |parent, timer, _event: &TimerCompletedEvent, cx| {
+                if parent.session_index == parent.preset.sessions.len() - 1 {
+                    // completed
+                    return;
+                }
+
+                let new_sess_index = parent.session_index + 1;
+                parent.session_index = new_sess_index;
+                timeline.update(cx, |e, _cx| e.active_index = new_sess_index);
+                let session = parent.session();
+
+                // start the next session
+                timer.update(cx, |e, cx| {
+                    e.start(session, cx);
+                });
+            }
+        })
+        .detach();
+
         return BmoApp {
-            timer: cx.new(|_| Timer::new()),
-            timeline: cx.new(|_| TimeLine::new()),
+            timer,
+            timeline,
             preset: TimerPreset::default(),
             session_index: 0,
+            // _subsriptions: vec![timer_tick_sub, timer_completed_sub],
         };
     }
 
@@ -41,7 +80,6 @@ impl BmoApp {
                 |e| e.path("svg/coffee.svg"),
             ))
             .child(self.timer.clone())
-            .child(div().child(current_session.title.clone()))
             .flex()
             .gap_2()
             .flex_col()

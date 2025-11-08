@@ -2,22 +2,20 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use gpui::{
-    ParentElement, Render, SharedString, Styled, div, percentage, prelude::FluentBuilder, px,
-    relative, rems, rgb,
-};
+use gpui::{Context, Div, relative, rgba};
+use gpui::{ParentElement, Render, SharedString, Styled, div, prelude::FluentBuilder, rems, rgb};
 use gpui_component::ActiveTheme;
 
 use crate::session::TimerPreset;
 
 pub struct TimeLineSegment {
-    duration: Duration,
     title: SharedString,
     color: u32,
 }
 
 pub struct TimeLine {
     pub active_index: usize,
+    pub current_progress: f32, // current progress in percentage 0 - 1
     pub total_duration: Duration,
     pub segments: Vec<TimeLineSegment>,
 }
@@ -25,6 +23,7 @@ pub struct TimeLine {
 impl TimeLine {
     pub fn new() -> Self {
         return Self {
+            current_progress: 0.,
             active_index: 0,
             total_duration: Duration::ZERO,
             segments: vec![],
@@ -61,12 +60,47 @@ impl TimeLine {
             .iter()
             .enumerate()
             .map(|(index, session)| TimeLineSegment {
-                duration: session.duration.clone(),
                 title: session.title.clone(),
-                color: Self::generate_color_for_segment(&session.title, index),
+                color: TimeLine::generate_color_for_segment(&session.title, index),
             })
             .collect();
     }
+}
+
+fn segment_component(
+    segment: &TimeLineSegment,
+    active: bool,
+    percent: f32,
+    cx: &mut Context<TimeLine>,
+) -> Div {
+    return div()
+        .min_w(rems(2.))
+        .when_else(
+            active,
+            |e| {
+                e.flex_grow()
+                    .relative()
+                    .child(div().w(relative(percent)).h_full().bg(rgba(0x00000055)))
+                    .child(
+                        div()
+                            .absolute()
+                            .flex()
+                            .size_full()
+                            .flex_row()
+                            .items_center()
+                            .justify_center()
+                            .child(segment.title.clone())
+                            .text_color(cx.theme().background),
+                    )
+                    .flex()
+                    .items_center()
+                    .h(rems(2.8))
+                    // .bg(rgb(0x5FE512))
+                    .bg(rgb(segment.color))
+            },
+            |e| e.h(rems(1.6)).border_1().border_color(cx.theme().border),
+        )
+        .rounded_lg();
 }
 
 impl Render for TimeLine {
@@ -85,22 +119,6 @@ impl Render for TimeLine {
             .rounded_xl()
             .relative()
             .child(
-                // stroke container
-                div()
-                    .p_1()
-                    .size_full()
-                    .absolute()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        // stroke
-                        div().w_full().h(px(1.)).bg(cx.theme().border),
-                    ),
-            )
-            // segments
-            .child(
                 div()
                     .absolute()
                     .px_2()
@@ -110,22 +128,12 @@ impl Render for TimeLine {
                     .gap_1()
                     .size_full()
                     .children(segments.iter().enumerate().map(|(index, seg)| {
-                        div()
-                            .min_w(rems(2.))
-                            .when_else(
-                                index == self.active_index,
-                                |e| {
-                                    e.flex_grow()
-                                        .child(div().child(seg.title.clone()))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .h(rems(2.8))
-                                },
-                                |e| e.h(rems(1.6)),
-                            )
-                            .bg(rgb(seg.color))
-                            .rounded_lg()
+                        segment_component(
+                            seg,
+                            index == self.active_index,
+                            self.current_progress,
+                            cx,
+                        )
                     })),
             );
     }

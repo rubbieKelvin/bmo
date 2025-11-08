@@ -30,12 +30,12 @@ impl Default for TimerPreset {
             sessions: vec![
                 Session::new(
                     "Focus".into(),
-                    Duration::from_millis(ONE_MIN_MS * 60),
+                    Duration::from_millis(ONE_MIN_MS * 2),
                     SessionKind::WORK,
                 ),
                 Session::new(
                     "Short break".into(),
-                    Duration::from_millis(ONE_MIN_MS * 10),
+                    Duration::from_millis(ONE_MIN_MS * 1),
                     SessionKind::BREAK,
                 ),
                 Session::new(
