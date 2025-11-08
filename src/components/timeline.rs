@@ -89,13 +89,13 @@ fn segment_component(
                             .flex_row()
                             .items_center()
                             .justify_center()
-                            .child(segment.title.clone())
+                            .text_sm()
+                            .child(segment.title.clone().to_uppercase())
                             .text_color(cx.theme().background),
                     )
                     .flex()
                     .items_center()
                     .h(rems(2.8))
-                    // .bg(rgb(0x5FE512))
                     .bg(rgb(segment.color))
             },
             |e| e.h(rems(1.6)).border_1().border_color(cx.theme().border),

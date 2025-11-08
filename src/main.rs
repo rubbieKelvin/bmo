@@ -9,7 +9,7 @@ mod constants;
 mod session;
 
 fn window_options(cx: &App) -> WindowOptions {
-    let bounds = Bounds::centered(None, size(px(720.), px(720.)), cx);
+    let bounds = Bounds::centered(None, size(px(600.), px(450.)), cx);
 
     return WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
