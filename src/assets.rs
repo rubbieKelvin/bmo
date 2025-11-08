@@ -1,30 +1,27 @@
-use anyhow;
-use gpui::{AssetSource, SharedString};
-use std::{fs, path::PathBuf};
+use anyhow::anyhow;
+use gpui::*;
+use rust_embed::RustEmbed;
+use std::borrow::Cow;
 
-pub struct Assets {
-    pub base: PathBuf,
-}
+#[derive(RustEmbed)]
+#[folder = "./assets"]
+#[include = "**/*.svg"]
+pub struct Assets;
 
 impl AssetSource for Assets {
-    fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
-        fs::read(self.base.join(path))
-            .map(|data| Some(std::borrow::Cow::Owned(data)))
-            .map_err(|err| err.into())
+    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path.is_empty() {
+            return Ok(None);
+        }
+
+        Self::get(path)
+            .map(|f| Some(f.data))
+            .ok_or_else(|| anyhow!("could not find asset at path \"{path}\""))
     }
 
-    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        fs::read_dir(self.base.join(path))
-            .map(|entries| {
-                entries
-                    .filter_map(|entry| {
-                        entry
-                            .ok()
-                            .and_then(|entry| entry.file_name().into_string().ok())
-                            .map(SharedString::from)
-                    })
-                    .collect()
-            })
-            .map_err(|err| err.into())
+    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        Ok(Self::iter()
+            .filter_map(|p| p.starts_with(path).then(|| p.into()))
+            .collect())
     }
 }

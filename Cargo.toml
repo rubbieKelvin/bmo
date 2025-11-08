@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 gpui = "0.2.2"
+gpui-component = "0.4.0-preview1"
+rust-embed = "8.9.0"

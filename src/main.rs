@@ -1,34 +1,28 @@
-use std::path::PathBuf;
-
 use gpui::*;
+use gpui_component::{Root, TitleBar};
+
+use crate::{app::BmoApp, assets::Assets};
 mod app;
 mod assets;
 mod components;
 mod constants;
 mod session;
-mod utils;
 
 fn window_options(cx: &App) -> WindowOptions {
-    let bounds = Bounds::centered(None, size(px(480.), px(480.)), cx);
+    let bounds = Bounds::centered(None, size(px(720.), px(720.)), cx);
 
     return WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        titlebar: Some(TitlebarOptions {
-            title: Some("Bmo".into()),
-            // appears_transparent: true,
-            ..Default::default()
-        }),
+        titlebar: Some(TitleBar::title_bar_options()),
         ..Default::default()
     };
 }
 
 fn main() {
-    let app = Application::new().with_assets(assets::Assets {
-        base: PathBuf::from("assets"),
-    });
+    let app = Application::new().with_assets(Assets);
 
-    app.run(|cx: &mut App| {
-        // bring window to the foreground
+    app.run(move |cx| {
+        gpui_component::init(cx);
         cx.activate(true);
 
         // close app when all windows are closed
@@ -39,9 +33,15 @@ fn main() {
         })
         .detach();
 
-        cx.open_window(window_options(cx), |_, cx| {
-            cx.new(|cx| app::BmoApp::new(cx))
+        let w_options = window_options(cx);
+        cx.spawn(async move |cx| -> anyhow::Result<()> {
+            cx.open_window(w_options, |window, cx| {
+                let view = cx.new(|cx| BmoApp::new(cx));
+                cx.new(|cx| Root::new(view.into(), window, cx))
+            })?;
+
+            return Ok(());
         })
-        .unwrap();
+        .detach();
     });
 }

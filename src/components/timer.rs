@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
-use gpui::{Context, EventEmitter, ParentElement, Render, Task, div};
+use gpui::{Context, EventEmitter, ParentElement, Render, Styled, Task, div, rems};
+use gpui_component::StyledExt;
 
 use crate::session::Session;
 
@@ -112,6 +113,17 @@ impl Render for Timer {
         _window: &mut gpui::Window,
         _cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        return div().child(self.countdown.as_secs().to_string());
+        let total_seconds = self.countdown.as_secs();
+
+        // format time to string
+        let hour = format!("{:02}", total_seconds / 3600);
+        let minute = format!("{:02}", (total_seconds / 60) % 60);
+        let seconds = format!("{:02}", total_seconds % 60);
+
+        return div()
+            .font_family("Monaco")
+            .child(format!("{hour}:{minute}:{seconds}"))
+            .text_size(rems(3.))
+            .font_medium();
     }
 }
