@@ -6,12 +6,12 @@ use gpui::{
 };
 
 use crate::components::Segment;
-use crate::session::PomorodoSession;
+use crate::session::PomodoroSession;
 
 pub struct TimerApp {
     remaining_seconds: u128,                  // count down
     session_progress: u8,                     // how many sessions have we passed
-    current_session: Entity<PomorodoSession>, // active session
+    current_session: Entity<PomodoroSession>, // active session
     timer_task: Option<Task<()>>,             // active timer
     is_running: bool,
     is_paused: bool,
@@ -24,7 +24,7 @@ impl TimerApp {
         return Self {
             remaining_seconds: 0,
             session_progress: 0,
-            current_session: cx.new(|_| PomorodoSession::default()),
+            current_session: cx.new(|_| PomodoroSession::default()),
             timer_task: None,
             is_paused: false,
             is_running: false,

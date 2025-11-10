@@ -1,11 +1,11 @@
 // pomorodo session info
-pub struct PomorodoSession {
+pub struct PomodoroSession {
     pub session_count: u8,
     pub break_duration: u128,
     pub focus_duration: u128,
 }
 
-impl Default for PomorodoSession {
+impl Default for PomodoroSession {
     fn default() -> Self {
         return Self {
             session_count: 4,
