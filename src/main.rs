@@ -6,6 +6,7 @@ mod app;
 mod assets;
 mod components;
 mod constants;
+mod db;
 mod events;
 mod session;
 

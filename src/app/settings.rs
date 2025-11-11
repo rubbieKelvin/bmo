@@ -25,6 +25,7 @@ impl SettingScreen {
                     items: vec![PresetItem {
                         label: "Default".into(),
                         id: "".into(),
+                        editable: false,
                     }],
                     selected_index: None,
                 },
@@ -84,9 +85,11 @@ impl Render for SettingScreen {
     }
 }
 
+#[allow(unused)]
 struct PresetItem {
     id: SharedString,
     label: SharedString,
+    editable: bool,
 }
 
 struct PresetListDelegate {

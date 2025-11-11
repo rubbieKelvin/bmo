@@ -9,3 +9,4 @@ gpui = "0.2.2"
 gpui-component = "0.4.0-preview1"
 rand = "0.9.2"
 rust-embed = "8.9.0"
+sqlx = {version="0.8.6", features=["runtime-async-std", "sqlite", "chrono"]}
