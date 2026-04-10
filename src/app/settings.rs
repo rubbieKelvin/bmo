@@ -1,32 +1,40 @@
 use gpui::{
-    App, AppContext, Context, Div, Entity, EventEmitter, ParentElement, Render, SharedString,
-    Styled, Window, div,
+    App, AppContext, Context, Div, Entity, EventEmitter, ParentElement, Render, SharedString, Styled,
+    Subscription, Window, div,
 };
 use gpui_component::{
-    Icon, IconName, IndexPath, TitleBar,
+    ActiveTheme as _, Icon, IndexPath, TitleBar,
     button::{Button, ButtonVariants},
+    input::{Input, InputEvent, InputState},
     label::Label,
-    list::{ListDelegate, ListItem, ListState},
+    list::{ListDelegate, ListEvent, ListItem, ListState},
 };
 
+use crate::db::{Database, Preset};
 use crate::events::navigation::{NavigationEvent, Screen};
 
 pub struct SettingScreen {
     pub preset_list: Entity<ListState<PresetListDelegate>>,
+    db: Entity<Database>,
+    new_preset_name: Entity<InputState>,
+    #[allow(dead_code)]
+    _db_obs: Subscription,
+    #[allow(dead_code)]
+    _list_sub: Subscription,
+    #[allow(dead_code)]
+    _name_input_sub: Subscription,
 }
 
 impl EventEmitter<NavigationEvent> for SettingScreen {}
 
 impl SettingScreen {
-    pub fn new(cx: &mut Context<Self>, window: &mut Window) -> Self {
+    pub fn new(cx: &mut Context<Self>, window: &mut Window, db: Entity<Database>) -> Self {
+        let presets = db.read(cx).presets().to_vec();
+
         let preset_list = cx.new(|cx| {
             ListState::new(
                 PresetListDelegate {
-                    items: vec![PresetItem {
-                        label: "Default".into(),
-                        id: "".into(),
-                        editable: false,
-                    }],
+                    presets,
                     selected_index: None,
                 },
                 window,
@@ -34,25 +42,104 @@ impl SettingScreen {
             )
         });
 
-        return SettingScreen { preset_list };
+        let new_preset_name = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("New preset name")
+        });
+
+        let _db_obs = cx.observe(&db, |this, _, cx| {
+            let presets = this.db.read(cx).presets().to_vec();
+            this.preset_list.update(cx, |list, cx| {
+                list.delegate_mut().presets = presets;
+                cx.notify();
+            });
+        });
+
+        let _list_sub = cx.subscribe(&preset_list, |_, list, event, cx| {
+            if let ListEvent::Confirm(ix) = event {
+                let preset = list.read(cx).delegate().presets.get(ix.row);
+                if let Some(p) = preset {
+                    if let Some(tp) = p.to_timer_preset() {
+                        cx.emit(NavigationEvent {
+                            screen: Screen::Timer,
+                            timer_preset: Some(tp),
+                        });
+                    }
+                }
+            }
+        });
+
+        let _name_input_sub = cx.subscribe_in(&new_preset_name, window, |this, _, ev, window, cx| {
+            if matches!(ev, InputEvent::PressEnter { .. }) {
+                this.submit_new_preset(window, cx);
+            }
+        });
+
+        SettingScreen {
+            preset_list,
+            db,
+            new_preset_name,
+            _db_obs,
+            _list_sub,
+            _name_input_sub,
+        }
     }
 
-    fn presets(&self) -> Div {
-        return div()
+    fn submit_new_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.new_preset_name.read(cx).value().to_string();
+        self.db.update(cx, |db, cx| {
+            db.create_preset(name, cx);
+        });
+        self.new_preset_name.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+    }
+
+    fn presets_section(&self, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
             .child(
                 div()
                     .flex()
                     .flex_row()
-                    .justify_between()
                     .items_center()
-                    .child(Label::new("Presets"))
-                    .child(Button::new("new-preset-button").icon(IconName::Plus)),
+                    .child(Label::new("Presets")),
             )
-            .child(self.preset_list.clone());
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        "Name your preset, then press Add or Enter (classic Pomodoro segments). Tap a row to use it on the timer.",
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap_2()
+                    .items_center()
+                    .child(Input::new(&self.new_preset_name).cleanable(true).flex_grow())
+                    .child(
+                        Button::new("add-preset-submit")
+                            .label("Add")
+                            .primary()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_new_preset(window, cx);
+                            })),
+                    ),
+            )
+            .child(self.preset_list.clone())
     }
 
-    fn body(&self) -> Div {
-        return div().p_2().flex().flex_col().gap_4().child(self.presets());
+    fn body(&self, cx: &mut Context<Self>) -> Div {
+        div()
+            .p_2()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(self.presets_section(cx))
     }
 }
 
@@ -62,38 +149,31 @@ impl Render for SettingScreen {
         _window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        return div()
+        div()
             .size_full()
             .flex()
             .flex_col()
             .child(
-                // title bar
                 TitleBar::new().child(div().child("Settings")).child(
                     div().flex().items_center().gap_2().child(
                         Button::new("settings")
                             .icon(Icon::new(Icon::empty()).path("icons/x.svg"))
                             .ghost()
-                            .on_click(cx.listener(|_this, _event, _window, cx| {
+                            .on_click(cx.listener(|_, _, _, cx| {
                                 cx.emit(NavigationEvent {
                                     screen: Screen::Timer,
+                                    timer_preset: None,
                                 });
                             })),
                     ),
                 ),
             )
-            .child(self.body().flex_grow());
+            .child(self.body(cx).flex_grow())
     }
 }
 
-#[allow(unused)]
-struct PresetItem {
-    id: SharedString,
-    label: SharedString,
-    editable: bool,
-}
-
 struct PresetListDelegate {
-    items: Vec<PresetItem>,
+    presets: Vec<Preset>,
     selected_index: Option<IndexPath>,
 }
 
@@ -101,7 +181,7 @@ impl ListDelegate for PresetListDelegate {
     type Item = ListItem;
 
     fn items_count(&self, _section: usize, _cx: &App) -> usize {
-        self.items.len()
+        self.presets.len()
     }
 
     fn render_item(
@@ -110,9 +190,9 @@ impl ListDelegate for PresetListDelegate {
         _window: &mut Window,
         _cx: &mut App,
     ) -> Option<Self::Item> {
-        self.items.get(ix.row).map(|item| {
+        self.presets.get(ix.row).map(|preset| {
             ListItem::new(ix)
-                .child(Label::new(item.label.clone()))
+                .child(Label::new(SharedString::from(preset.name.clone())))
                 .selected(Some(ix) == self.selected_index)
         })
     }

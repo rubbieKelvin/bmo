@@ -155,6 +155,20 @@ impl TimerScreen {
             ));
     }
 
+    pub fn set_preset(&mut self, preset: TimerPreset, cx: &mut Context<Self>) {
+        self.preset = preset;
+        self.session_index = 0;
+        self.timer.update(cx, |t, cx| {
+            t.stop(cx);
+        });
+        let preset_ref = &self.preset;
+        self.timeline.update(cx, |tl, _cx| {
+            tl.active_index = 0;
+            tl.current_progress = 0.;
+            tl.update_segments(preset_ref);
+        });
+    }
+
     fn start_timer(&mut self, cx: &mut Context<Self>) {
         let session = self.session();
         let preset = &self.preset;
@@ -230,8 +244,8 @@ impl Render for TimerScreen {
                             .ghost()
                             .on_click(cx.listener(|_this, _event, _window, cx| {
                                 cx.emit(NavigationEvent {
-                                    // we'll populate the vec later
-                                    screen: Screen::Settings(vec![]),
+                                    screen: Screen::Settings,
+                                    timer_preset: None,
                                 });
                             })),
                     ),

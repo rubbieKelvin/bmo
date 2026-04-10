@@ -16,9 +16,9 @@ pub struct BmoApp {
 
 impl BmoApp {
     pub fn new(cx: &mut Context<Self>, window: &mut Window) -> Self {
-        let timer_screen = cx.new(|cx| TimerScreen::new(cx));
-        let setting_screen = cx.new(|cx| settings::SettingScreen::new(cx, window));
         let db = cx.new(|_cx| Database::new());
+        let timer_screen = cx.new(|cx| TimerScreen::new(cx));
+        let setting_screen = cx.new(|cx| settings::SettingScreen::new(cx, window, db.clone()));
 
         db.update(cx, |this, cx| {
             this.init(cx);
@@ -35,11 +35,17 @@ impl BmoApp {
 
         cx.subscribe(&setting_screen, {
             let db = db.clone();
+            let timer_screen = timer_screen.clone();
             move |parent, _entity, event: &NavigationEvent, context| {
                 parent.set_screen(event.screen.clone(), context);
                 db.update(context, |this, cx| {
                     this.update_preset_list(cx);
                 });
+                if let Some(preset) = event.timer_preset.clone() {
+                    timer_screen.update(context, |t, cx| {
+                        t.set_preset(preset, cx);
+                    });
+                }
             }
         })
         .detach();
@@ -56,7 +62,7 @@ impl BmoApp {
         self.current_screen = screen.clone();
 
         match screen {
-            Screen::Settings(..) => {
+            Screen::Settings => {
                 self.db.update(cx, |this, cx| this.update_preset_list(cx));
             }
             _ => (),
@@ -73,7 +79,7 @@ impl Render for BmoApp {
     ) -> impl gpui::IntoElement {
         return match self.current_screen {
             Screen::Timer => div().size_full().child(self.timer_screen.clone()),
-            Screen::Settings(..) => div().size_full().child(self.setting_screen.clone()),
+            Screen::Settings => div().size_full().child(self.setting_screen.clone()),
         };
     }
 }

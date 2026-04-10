@@ -1,8 +1,34 @@
 use gpui::Context;
-use sqlx::{FromRow, SqlitePool, sqlite, types::chrono::NaiveDateTime};
+use sqlx::{
+    FromRow, SqlitePool, sqlite,
+    types::chrono::{NaiveDate, NaiveDateTime},
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
+
+use crate::session::{SessionKind, TimerPreset};
+
+fn unix_epoch_naive() -> NaiveDateTime {
+    NaiveDate::from_ymd_opt(1970, 1, 1)
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .expect("epoch")
+}
+
+/// SQLite `CURRENT_TIMESTAMP` uses `YYYY-MM-DD HH:MM:SS`; chrono's `NaiveDateTime` `FromStr` expects a `T` separator.
+fn parse_sqlite_datetime(raw: &str) -> NaiveDateTime {
+    let s = raw.trim();
+    if s.is_empty() {
+        return unix_epoch_naive();
+    }
+    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f"))
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M"))
+        .or_else(|_| s.parse())
+        .unwrap_or_else(|_| {
+            eprintln!("bmo: invalid created_date {raw:?}, using Unix epoch");
+            unix_epoch_naive()
+        })
+}
 
 #[derive(sqlx::Type, Debug, Clone, PartialEq, Eq)]
 #[sqlx(type_name = "TEXT")]
@@ -31,6 +57,36 @@ pub struct Preset {
     pub created_date: NaiveDateTime,
     pub is_deleted: i64,
     pub sessions: Vec<Session>,
+}
+
+impl Preset {
+    pub fn to_timer_preset(&self) -> Option<TimerPreset> {
+        use crate::session::Session as TimerSession;
+        use std::time::Duration;
+
+        if self.sessions.is_empty() {
+            return None;
+        }
+        let sessions: Vec<TimerSession> = self
+            .sessions
+            .iter()
+            .map(|s| {
+                let kind = match s.session_type {
+                    SessionType::Focus => SessionKind::WORK,
+                    SessionType::Break => SessionKind::BREAK,
+                };
+                TimerSession::new(
+                    s.name.clone().into(),
+                    Duration::from_secs(s.duration_in_sec.max(1) as u64),
+                    kind,
+                )
+            })
+            .collect();
+        Some(TimerPreset {
+            title: self.name.clone().into(),
+            sessions,
+        })
+    }
 }
 
 pub struct Database {
@@ -109,7 +165,7 @@ impl Database {
             WHERE
                 p.is_deleted = 0
             ORDER BY
-                p.id;
+                p.id, s.id;
             "#,
         )
         .fetch_all(pool)
@@ -123,7 +179,7 @@ impl Database {
                 id: row.p_id,
                 name: row.p_name.clone(),
                 description: row.p_description.clone(),
-                created_date: NaiveDateTime::from_str(&row.p_created_date).unwrap(),
+                created_date: parse_sqlite_datetime(&row.p_created_date),
                 is_deleted: row.p_is_deleted,
                 sessions: Vec::new(),
             });
@@ -143,7 +199,74 @@ impl Database {
             }
         }
 
-        Ok(presets_map.into_values().collect())
+        let mut list: Vec<Preset> = presets_map.into_values().collect();
+        list.sort_by_key(|p| p.id);
+        Ok(list)
+    }
+
+    async fn insert_preset_with_template_sessions(
+        pool: &SqlitePool,
+        name: String,
+        description: Option<String>,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = pool.begin().await?;
+
+        sqlx::query("INSERT INTO presets (name, description) VALUES (?, ?)")
+            .bind(&name)
+            .bind(&description)
+            .execute(&mut *tx)
+            .await?;
+
+        let preset_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+            .fetch_one(&mut *tx)
+            .await?;
+
+        let template = TimerPreset::default();
+        for s in template.sessions.iter() {
+            let session_type = match s.kind {
+                SessionKind::WORK => SessionType::Focus,
+                SessionKind::BREAK => SessionType::Break,
+            };
+            let secs = s.duration.as_secs().max(1) as i64;
+            sqlx::query(
+                "INSERT INTO session (preset_id, name, duration_in_sec, color, type) VALUES (?, ?, ?, NULL, ?)",
+            )
+            .bind(preset_id)
+            .bind(s.title.to_string())
+            .bind(secs)
+            .bind(session_type)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub fn presets(&self) -> &[Preset] {
+        &self.presets
+    }
+
+    pub fn create_preset(&self, name: String, cx: &mut Context<Self>) {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let Some(pool) = self.pool() else {
+            return;
+        };
+
+        cx.spawn(async move |entity, cx| {
+            if let Err(e) = Database::insert_preset_with_template_sessions(&pool, name, None).await {
+                eprintln!("Failed to create preset: {}", e);
+                return;
+            }
+            let Some(entity) = entity.upgrade() else {
+                return;
+            };
+            let _ = entity.update(cx, |this, cx| this.update_preset_list(cx));
+        })
+        .detach();
     }
 
     pub fn update_preset_list(&self, cx: &mut Context<Self>) {

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT\n                p.id as \"p_id!\",\n                p.name as \"p_name!\",\n                p.description as \"p_description\",\n                p.created_date as \"p_created_date!\",\n                p.is_deleted as \"p_is_deleted!\",\n\n                s.id as \"s_id?\",\n                s.preset_id as \"s_preset_id?\",\n                s.name as \"s_name?\",\n                s.duration_in_sec as \"s_duration?\",\n                s.color as \"s_color?\", -- This is already Option<i64>\n                s.type as \"s_type?: SessionType\" -- *** THIS IS THE CHANGE ***\n            FROM\n                presets p\n            LEFT JOIN\n                session s ON p.id = s.preset_id\n            WHERE\n                p.is_deleted = 0\n            ORDER BY\n                p.id;\n            ",
+  "query": "\n            SELECT\n                p.id as \"p_id!\",\n                p.name as \"p_name!\",\n                p.description as \"p_description\",\n                p.created_date as \"p_created_date!\",\n                p.is_deleted as \"p_is_deleted!\",\n\n                s.id as \"s_id?\",\n                s.preset_id as \"s_preset_id?\",\n                s.name as \"s_name?\",\n                s.duration_in_sec as \"s_duration?\",\n                s.color as \"s_color?\", -- This is already Option<i64>\n                s.type as \"s_type?: SessionType\" -- *** THIS IS THE CHANGE ***\n            FROM\n                presets p\n            LEFT JOIN\n                session s ON p.id = s.preset_id\n            WHERE\n                p.is_deleted = 0\n            ORDER BY\n                p.id, s.id;\n            ",
   "describe": {
     "columns": [
       {
@@ -76,5 +76,5 @@
       true
     ]
   },
-  "hash": "973e5dd289a787dabd305be932b67d81237f325682f3d90568a070f3eb0a4ba4"
+  "hash": "133d21480fcb610e6a171d2accc59a78b364af7137e67b64c5e9a3b024d6c042"
 }
