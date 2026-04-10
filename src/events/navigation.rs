@@ -1,11 +1,13 @@
-#[derive(Debug, Clone, Copy)]
+use crate::db::Preset;
+
+#[derive(Debug, Clone)]
 pub enum Screen {
     Timer,
-    Settings,
+    Settings(Vec<Preset>),
     // PresetEdit,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct NavigationEvent {
     pub screen: Screen,
 }

@@ -12,7 +12,7 @@ use gpui_component::{
 use crate::events::navigation::{NavigationEvent, Screen};
 
 pub struct SettingScreen {
-    preset_list: Entity<ListState<PresetListDelegate>>,
+    pub preset_list: Entity<ListState<PresetListDelegate>>,
 }
 
 impl EventEmitter<NavigationEvent> for SettingScreen {}

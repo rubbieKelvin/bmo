@@ -230,7 +230,8 @@ impl Render for TimerScreen {
                             .ghost()
                             .on_click(cx.listener(|_this, _event, _window, cx| {
                                 cx.emit(NavigationEvent {
-                                    screen: Screen::Settings,
+                                    // we'll populate the vec later
+                                    screen: Screen::Settings(vec![]),
                                 });
                             })),
                     ),
