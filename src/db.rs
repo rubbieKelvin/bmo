@@ -238,10 +238,7 @@ impl Database {
             active_preset_id: row.try_get("active_preset_id").ok(),
             default_preset_id: row.try_get("default_preset_id").ok(),
             auto_advance: row.try_get::<i64, _>("auto_advance").unwrap_or(1) != 0,
-            notifications_enabled: row
-                .try_get::<i64, _>("notifications_enabled")
-                .unwrap_or(1)
-                != 0,
+            notifications_enabled: row.try_get::<i64, _>("notifications_enabled").unwrap_or(1) != 0,
             sounds_enabled: row.try_get::<i64, _>("sounds_enabled").unwrap_or(1) != 0,
             theme: row.try_get("theme").unwrap_or_else(|_| "dark".to_string()),
         })
@@ -275,37 +272,46 @@ impl Database {
         stored.filter(|id| presets.iter().any(|p| p.id == *id))
     }
 
-    pub fn set_active_preset_id(&mut self, id: i64) {
+    pub fn set_active_preset_id(&mut self, id: i64, cx: &mut Context<Self>) {
         self.prefs.active_preset_id = Some(id);
+        self.schedule_persist_prefs(cx);
+        cx.notify();
     }
 
-    pub fn clear_active_preset_id(&mut self) {
+    pub fn clear_active_preset_id(&mut self, cx: &mut Context<Self>) {
         self.prefs.active_preset_id = None;
+        self.schedule_persist_prefs(cx);
+        cx.notify();
     }
 
     pub fn set_default_preset_id(&mut self, id: Option<i64>, cx: &mut Context<Self>) {
         self.prefs.default_preset_id = id;
         self.schedule_persist_prefs(cx);
+        cx.notify();
     }
 
     pub fn set_auto_advance(&mut self, v: bool, cx: &mut Context<Self>) {
         self.prefs.auto_advance = v;
         self.schedule_persist_prefs(cx);
+        cx.notify();
     }
 
     pub fn set_notifications_enabled(&mut self, v: bool, cx: &mut Context<Self>) {
         self.prefs.notifications_enabled = v;
         self.schedule_persist_prefs(cx);
+        cx.notify();
     }
 
     pub fn set_sounds_enabled(&mut self, v: bool, cx: &mut Context<Self>) {
         self.prefs.sounds_enabled = v;
         self.schedule_persist_prefs(cx);
+        cx.notify();
     }
 
     pub fn set_theme(&mut self, theme: String, cx: &mut Context<Self>) {
         self.prefs.theme = theme;
         self.schedule_persist_prefs(cx);
+        cx.notify();
     }
 
     pub fn schedule_persist_active_preset(&self, cx: &mut Context<Self>) {
@@ -680,12 +686,7 @@ impl Database {
         .detach();
     }
 
-    pub fn reorder_sessions(
-        &self,
-        _preset_id: i64,
-        ordered_ids: Vec<i64>,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn reorder_sessions(&self, _preset_id: i64, ordered_ids: Vec<i64>, cx: &mut Context<Self>) {
         let Some(pool) = self.pool() else {
             return;
         };
@@ -768,6 +769,7 @@ impl Database {
                 if need_persist {
                     this.schedule_persist_prefs(cx);
                 }
+                cx.notify();
             });
         })
         .detach();
@@ -804,6 +806,7 @@ impl Database {
                 if dirty {
                     this.schedule_persist_prefs(cx);
                 }
+                cx.notify();
             });
         })
         .detach();

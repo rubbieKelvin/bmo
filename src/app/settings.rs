@@ -73,8 +73,7 @@ impl SettingScreen {
         };
         let tp = p.to_timer_preset();
         self.db.update(cx, |db, cx| {
-            db.set_active_preset_id(p.id);
-            db.schedule_persist_active_preset(cx);
+            db.set_active_preset_id(p.id, cx);
         });
         cx.emit(NavigationEvent {
             screen: Screen::Timer,
@@ -170,19 +169,15 @@ impl SettingScreen {
             .child(Label::new("Presets"))
             .child(
                 div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Use runs the preset now. The pencil icon opens the session editor.",
-                    ),
-            )
-            .child(
-                div()
                     .flex()
                     .flex_row()
                     .gap_2()
                     .items_center()
-                    .child(Input::new(&self.new_preset_name).cleanable(true).flex_grow())
+                    .child(
+                        Input::new(&self.new_preset_name)
+                            .cleanable(true)
+                            .flex_grow(),
+                    )
                     .child(
                         Button::new("add-preset-submit")
                             .label("Add")
@@ -311,28 +306,24 @@ impl SettingScreen {
                             .when(!is_dark, |b| b.ghost())
                             .on_click(cx.listener(|this, _e, window, cx| {
                                 Theme::change(ThemeMode::Dark, Some(window), cx);
-                                this.db
-                                    .update(cx, |db, cx| db.set_theme("dark".into(), cx));
+                                this.db.update(cx, |db, cx| db.set_theme("dark".into(), cx));
                             })),
                     ),
             )
     }
 
     fn body(&self, cx: &mut Context<Self>) -> Div {
-        div()
-            .flex_grow()
-            .min_h(px(0.))
-            .child(
-                div()
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .size_full()
-                    .scrollable(gpui_component::scroll::ScrollbarAxis::Vertical)
-                    .child(self.presets_section(cx))
-                    .child(self.general_section(cx)),
-            )
+        div().flex_grow().min_h(px(0.)).child(
+            div()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .size_full()
+                .scrollable(gpui_component::scroll::ScrollbarAxis::Vertical)
+                .child(self.presets_section(cx))
+                .child(self.general_section(cx)),
+        )
     }
 }
 

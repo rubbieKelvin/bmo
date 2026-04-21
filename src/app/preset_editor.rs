@@ -143,10 +143,6 @@ impl PresetEditorScreen {
         }
     }
 
-    pub fn preset_id(&self) -> i64 {
-        self.preset_id
-    }
-
     fn build_row(cx: &mut Context<Self>, window: &mut Window, s: Session) -> SessionRow {
         let name_state = cx.new(|cx| {
             InputState::new(window, cx)
@@ -267,7 +263,9 @@ impl PresetEditorScreen {
             }
             let name = row.name_state.read(cx).value().to_string();
             let raw = row.duration_state.read(cx).value().to_string();
-            let secs = parse_duration(&raw).unwrap_or(row.committed_duration).max(1);
+            let secs = parse_duration(&raw)
+                .unwrap_or(row.committed_duration)
+                .max(1);
             pending.push(PendingSession {
                 id: row.id,
                 name,
@@ -406,11 +404,7 @@ impl PresetEditorScreen {
                     .min_w(px(80.))
                     .child(Input::new(&row.name_state)),
             )
-            .child(
-                div()
-                    .w(px(80.))
-                    .child(Input::new(&row.duration_state)),
-            )
+            .child(div().w(px(80.)).child(Input::new(&row.duration_state)))
             .child(
                 Button::new(("type-toggle", id as usize))
                     .label(type_label)
@@ -489,19 +483,7 @@ impl PresetEditorScreen {
                     .gap_2()
                     .items_center()
                     .child(Label::new("Name"))
-                    .child(
-                        div()
-                            .flex_grow()
-                            .child(Input::new(&self.title_state)),
-                    ),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Sessions run top-to-bottom. Edit names and durations (mm:ss), then click \"Save preset\". Add/remove/reorder apply immediately.",
-                    ),
+                    .child(div().flex_grow().child(Input::new(&self.title_state))),
             )
             .child(
                 div()
@@ -539,14 +521,11 @@ impl PresetEditorScreen {
                             .on_click(cx.listener(|this, _, _, cx| this.delete_preset(cx))),
                     )
                     .child(div().flex_grow())
-                    .child(
-                        div()
-                            .when(dirty, |d| {
-                                d.text_sm()
-                                    .text_color(cx.theme().warning)
-                                    .child("Unsaved changes")
-                            }),
-                    )
+                    .child(div().when(dirty, |d| {
+                        d.text_sm()
+                            .text_color(cx.theme().warning)
+                            .child("Unsaved changes")
+                    }))
                     .child(
                         Button::new("save-preset")
                             .label("Save preset")

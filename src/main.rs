@@ -12,8 +12,8 @@ mod events;
 mod notifications;
 mod session;
 
-const MIN_W: f32 = 700.;
-const MIN_H: f32 = 600.;
+const MIN_W: f32 = 800.;
+const MIN_H: f32 = 650.;
 
 fn window_options(cx: &App) -> WindowOptions {
     let bounds = Bounds::centered(None, size(px(MIN_W), px(MIN_H)), cx);
