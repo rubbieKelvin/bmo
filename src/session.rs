@@ -9,6 +9,9 @@ use crate::constants::ONE_MIN_MS;
 pub struct TimerPreset {
     pub title: SharedString,
     pub sessions: Vec<Session>,
+    /// Database `presets.id` when loaded from SQLite; `None` for the built-in default.
+    #[allow(dead_code)]
+    pub source_id: Option<i64>,
 }
 
 impl TimerPreset {
@@ -27,6 +30,7 @@ impl Default for TimerPreset {
     fn default() -> Self {
         return Self {
             title: "Poromodo".into(),
+            source_id: None,
             sessions: vec![
                 Session::new(
                     "Focus".into(),
@@ -79,6 +83,9 @@ pub struct Session {
     pub title: SharedString,
     pub duration: Duration,
     pub kind: SessionKind,
+    /// Palette index for this session's timeline tint. `None` means "use the
+    /// auto palette based on position in the preset".
+    pub color: Option<i64>,
 }
 
 impl Session {
@@ -87,6 +94,7 @@ impl Session {
             title,
             duration,
             kind,
+            color: None,
         };
     }
 }

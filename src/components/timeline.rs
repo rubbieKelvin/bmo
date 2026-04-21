@@ -1,11 +1,10 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use gpui::{Context, Div, relative, rgba};
 use gpui::{ParentElement, Render, SharedString, Styled, div, prelude::FluentBuilder, rems, rgb};
 use gpui_component::ActiveTheme;
 
+use crate::db::session_color_for;
 use crate::session::TimerPreset;
 
 pub struct TimeLineSegment {
@@ -30,29 +29,6 @@ impl TimeLine {
         };
     }
 
-    /// Generate a random color that complements dark UI themes
-    /// Uses a hash of the title to ensure consistent colors for the same segment
-    fn generate_color_for_segment(title: &str, index: usize) -> u32 {
-        let mut hasher = DefaultHasher::new();
-        title.hash(&mut hasher);
-        index.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        // Generate muted colors that work well with dark backgrounds
-        // Keep values in range 30-150 for good contrast without being too bright
-        let r = ((hash >> 0) & 0xFF) as u8;
-        let g = ((hash >> 8) & 0xFF) as u8;
-        let b = ((hash >> 16) & 0xFF) as u8;
-
-        // Map to a darker, more muted range (30-150)
-        let r = 30 + (r as u32 * 120 / 255) as u8;
-        let g = 30 + (g as u32 * 120 / 255) as u8;
-        let b = 30 + (b as u32 * 120 / 255) as u8;
-
-        // Pack into u32 as 0xRRGGBB
-        ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
-    }
-
     pub fn update_segments(&mut self, preset: &TimerPreset) {
         self.total_duration = preset.total_duration();
         self.segments = preset
@@ -61,7 +37,7 @@ impl TimeLine {
             .enumerate()
             .map(|(index, session)| TimeLineSegment {
                 title: session.title.clone(),
-                color: TimeLine::generate_color_for_segment(&session.title, index),
+                color: session_color_for(session.color, index),
             })
             .collect();
     }

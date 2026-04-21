@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS session (
     preset_id         INTEGER NOT NULL,
     name              TEXT NOT NULL,
     duration_in_sec   INTEGER NOT NULL,
-    color             INTEGER NOT NULL,
+    color             INTEGER,
     type              TEXT NOT NULL CHECK(type IN ('focus', 'break')),
 
     FOREIGN KEY(preset_id) REFERENCES presets(id)
