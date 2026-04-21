@@ -21,7 +21,7 @@ Out of scope or not yet implemented in code (see README for aspirational items):
 
 | Area            | Choice                                                                                                            |
 | --------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Language        | Rust (edition 2024)                                                                                               |
+| Language        | Rust                                                                                         |
 | UI              | [GPUI](https://crates.io/crates/gpui) `0.2.x` — GPU-oriented, immediate-mode style desktop UI                     |
 | UI kit          | [gpui-component](https://crates.io/crates/gpui-component) — title bar, buttons, lists, inputs, theming hooks      |
 | Persistence     | [SQLx](https://crates.io/crates/sqlx) with **SQLite**, async runtime `async-std`, migrations via `sqlx::migrate!` |
@@ -31,32 +31,6 @@ Out of scope or not yet implemented in code (see README for aspirational items):
 
 Release builds use **LTO** and **strip**; an extra `release-distro` profile favors maximum optimization for distribution.
 
----
-
-## Repository layout
-
-```
-src/
-  main.rs           # Application entry: GPUI app, window options, Root + TitleBar
-  app/
-    mod.rs          # BmoApp shell: screen routing, Database entity, preset sync
-    timer.rs        # TimerScreen: title bar, timer + timeline, controls
-    settings.rs     # SettingScreen: preset list, new preset input, navigation
-  components/
-    timer.rs        # Countdown Timer entity, tick/completed events, async tick loop
-    timeline.rs     # Segment strip + progress for the current preset
-  session.rs        # TimerPreset + Session + SessionKind (in-memory model)
-  db.rs             # Database entity: SQLite pool, presets, active preset persistence
-  events/
-    navigation.rs   # Screen enum + NavigationEvent (optional TimerPreset payload)
-  assets.rs         # RustEmbed AssetSource for GPUI
-  constants.rs      # Shared timing constants (e.g. one minute in ms)
-assets/             # SVGs (icons/, svg/) loaded via rust-embed
-migrations/         # SQL migrations applied on DB connect
-bmo.db              # Local SQLite file (created at runtime; not required in repo)
-```
-
----
 
 ## Runtime architecture
 
@@ -149,10 +123,4 @@ cargo build --release
 
 ## License
 
-The project is licensed under the **GNU GPLv3** (see [LICENSE](LICENSE)).
-
----
-
-## Relationship to README
-
-[README.md](README.md) is the user-facing quick start. Parts of it still describe early roadmap items (for example “settings needs implementation”) that the codebase has since grown beyond: **settings, presets, and persistent active preset selection are implemented** as described above. Notifications, sounds, and richer preset editing remain natural next steps.
+The project is licensed under the **GNU GPLv3**
