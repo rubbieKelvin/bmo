@@ -1,4 +1,4 @@
-use gpui::{AppContext, Context, Entity, ParentElement, Render, Styled, Window, div};
+use gpui::{AppContext, Context, Entity, ParentElement, Render, Styled, Subscription, Window, div};
 
 use crate::app::timer::TimerScreen;
 use crate::db::Database;
@@ -12,6 +12,10 @@ pub struct BmoApp {
     db: Entity<Database>,
     timer_screen: Entity<TimerScreen>,
     setting_screen: Entity<settings::SettingScreen>,
+    last_applied_active_preset_id: Option<i64>,
+    pending_initial_db_timer_sync: bool,
+    #[allow(dead_code)]
+    _db_timer_sync: Subscription,
 }
 
 impl BmoApp {
@@ -50,11 +54,35 @@ impl BmoApp {
         })
         .detach();
 
+        let _db_timer_sync = cx.observe(&db, |app, db_ent, cx| {
+            let id = db_ent.read(cx).active_preset_id();
+            if !app.pending_initial_db_timer_sync && id == app.last_applied_active_preset_id {
+                return;
+            }
+            app.pending_initial_db_timer_sync = false;
+            app.last_applied_active_preset_id = id;
+
+            if let Some(pid) = id {
+                let preset = db_ent
+                    .read(cx)
+                    .presets()
+                    .iter()
+                    .find(|p| p.id == pid)
+                    .and_then(|p| p.to_timer_preset());
+                if let Some(tp) = preset {
+                    app.timer_screen.update(cx, |t, cx| t.set_preset(tp, cx));
+                }
+            }
+        });
+
         return Self {
             current_screen: Screen::Timer,
             db,
             timer_screen,
             setting_screen,
+            last_applied_active_preset_id: None,
+            pending_initial_db_timer_sync: true,
+            _db_timer_sync,
         };
     }
 

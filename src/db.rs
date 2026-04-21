@@ -84,6 +84,7 @@ impl Preset {
             .collect();
         Some(TimerPreset {
             title: self.name.clone().into(),
+            source_id: Some(self.id),
             sessions,
         })
     }
@@ -92,6 +93,7 @@ impl Preset {
 pub struct Database {
     _pool: Option<sqlx::SqlitePool>,
     presets: Vec<Preset>,
+    active_preset_id: Option<i64>,
 }
 
 impl Database {
@@ -127,7 +129,7 @@ impl Database {
                 .update(cx, |this, cx| {
                     this._pool = pool;
                     if this._pool.is_some() {
-                        this.update_preset_list(cx);
+                        this.reload_from_disk(cx);
                     }
                 })
                 .unwrap();
@@ -139,7 +141,51 @@ impl Database {
         return Self {
             _pool: None,
             presets: vec![],
+            active_preset_id: None,
         };
+    }
+
+    pub fn active_preset_id(&self) -> Option<i64> {
+        self.active_preset_id
+    }
+
+    async fn load_active_preset_id(pool: &SqlitePool) -> Option<i64> {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT active_preset_id FROM app_settings WHERE id = 1",
+        )
+        .fetch_one(pool)
+        .await
+        .ok()
+        .flatten()
+    }
+
+    async fn persist_active_preset_id(pool: &SqlitePool, id: Option<i64>) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE app_settings SET active_preset_id = ? WHERE id = 1")
+            .bind(id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    fn validated_active_id(presets: &[Preset], stored: Option<i64>) -> Option<i64> {
+        stored.filter(|id| presets.iter().any(|p| p.id == *id))
+    }
+
+    pub fn set_active_preset_id(&mut self, id: i64) {
+        self.active_preset_id = Some(id);
+    }
+
+    pub fn schedule_persist_active_preset(&self, cx: &mut Context<Self>) {
+        let id = self.active_preset_id;
+        let Some(pool) = self.pool() else {
+            return;
+        };
+        cx.spawn(async move |_entity, _cx| {
+            if let Err(e) = Database::persist_active_preset_id(&pool, id).await {
+                eprintln!("Failed to persist active preset: {}", e);
+            }
+        })
+        .detach();
     }
 
     async fn get_presets(pool: &SqlitePool) -> Result<Vec<Preset>, sqlx::Error> {
@@ -269,6 +315,38 @@ impl Database {
         .detach();
     }
 
+    /// Full reload: presets from DB plus `active_preset_id` from `app_settings` (call once after connect).
+    pub fn reload_from_disk(&self, cx: &mut Context<Self>) {
+        let Some(pool) = self.pool() else {
+            return;
+        };
+
+        cx.spawn(async move |entity, cx| {
+            let entity = entity.upgrade().unwrap();
+            let presets = match Database::get_presets(&pool).await {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Failed to load presets: {}", e);
+                    return;
+                }
+            };
+            let stored = Database::load_active_preset_id(&pool).await;
+            let validated = Database::validated_active_id(&presets, stored);
+            let need_clear = stored.is_some() && validated.is_none();
+            entity
+                .update(cx, |this, cx| {
+                    this.presets = presets;
+                    this.active_preset_id = validated;
+                    if need_clear {
+                        this.schedule_persist_active_preset(cx);
+                    }
+                })
+                .unwrap();
+        })
+        .detach();
+    }
+
+    /// Refresh preset rows only; keeps in-memory `active_preset_id` unless it no longer exists.
     pub fn update_preset_list(&self, cx: &mut Context<Self>) {
         let Some(pool) = self.pool() else {
             return;
@@ -276,10 +354,23 @@ impl Database {
 
         cx.spawn(async move |entity, cx| {
             let entity = entity.upgrade().unwrap();
-            let presets = Database::get_presets(&pool).await.unwrap();
+            let presets = match Database::get_presets(&pool).await {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Failed to load presets: {}", e);
+                    return;
+                }
+            };
             entity
-                .update(cx, |this, _cx| {
-                    this.presets = presets;
+                .update(cx, |this, cx| {
+                    this.presets = presets.clone();
+                    let next = Database::validated_active_id(&presets, this.active_preset_id);
+                    let cleared_stale =
+                        this.active_preset_id != next && this.active_preset_id.is_some();
+                    this.active_preset_id = next;
+                    if cleared_stale {
+                        this.schedule_persist_active_preset(cx);
+                    }
                 })
                 .unwrap();
         })

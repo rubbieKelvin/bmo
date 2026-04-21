@@ -1,9 +1,10 @@
+use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Context, Div, Entity, EventEmitter, ParentElement, Render, SharedString, Styled,
-    Subscription, Window, div,
+    Subscription, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, IndexPath, TitleBar,
+    ActiveTheme as _, Icon, IconName, IndexPath, TitleBar,
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
     label::Label,
@@ -30,11 +31,13 @@ impl EventEmitter<NavigationEvent> for SettingScreen {}
 impl SettingScreen {
     pub fn new(cx: &mut Context<Self>, window: &mut Window, db: Entity<Database>) -> Self {
         let presets = db.read(cx).presets().to_vec();
+        let active_preset_id = db.read(cx).active_preset_id();
 
         let preset_list = cx.new(|cx| {
             ListState::new(
                 PresetListDelegate {
                     presets,
+                    active_preset_id,
                     selected_index: None,
                 },
                 window,
@@ -48,17 +51,23 @@ impl SettingScreen {
 
         let _db_obs = cx.observe(&db, |this, _, cx| {
             let presets = this.db.read(cx).presets().to_vec();
+            let active_preset_id = this.db.read(cx).active_preset_id();
             this.preset_list.update(cx, |list, cx| {
-                list.delegate_mut().presets = presets;
+                let d = list.delegate_mut();
+                d.presets = presets;
+                d.active_preset_id = active_preset_id;
                 cx.notify();
             });
         });
 
-        let _list_sub = cx.subscribe(&preset_list, |_, list, event, cx| {
+        let _list_sub = cx.subscribe(&preset_list, |this, list, event, cx| {
             if let ListEvent::Confirm(ix) = event {
-                let preset = list.read(cx).delegate().presets.get(ix.row);
-                if let Some(p) = preset {
+                if let Some(p) = list.read(cx).delegate().presets.get(ix.row).cloned() {
                     if let Some(tp) = p.to_timer_preset() {
+                        this.db.update(cx, |db, cx| {
+                            db.set_active_preset_id(p.id);
+                            db.schedule_persist_active_preset(cx);
+                        });
                         cx.emit(NavigationEvent {
                             screen: Screen::Timer,
                             timer_preset: Some(tp),
@@ -111,7 +120,7 @@ impl SettingScreen {
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Name your preset, then press Add or Enter (classic Pomodoro segments). Tap a row to use it on the timer.",
+                        "Name your preset, then press Add or Enter (classic Pomodoro segments). Tap a row to set it as the timer preset and return to the timer.",
                     ),
             )
             .child(
@@ -130,7 +139,21 @@ impl SettingScreen {
                             })),
                     ),
             )
-            .child(self.preset_list.clone())
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .flex_grow()
+                    .min_h(px(0.))
+                    .child(Label::new("Your presets"))
+                    .child(
+                        div()
+                            .flex_grow()
+                            .min_h(px(160.))
+                            .child(self.preset_list.clone()),
+                    ),
+            )
     }
 
     fn body(&self, cx: &mut Context<Self>) -> Div {
@@ -139,7 +162,9 @@ impl SettingScreen {
             .flex()
             .flex_col()
             .gap_4()
-            .child(self.presets_section(cx))
+            .flex_grow()
+            .min_h(px(0.))
+            .child(self.presets_section(cx).flex_grow())
     }
 }
 
@@ -153,6 +178,7 @@ impl Render for SettingScreen {
             .size_full()
             .flex()
             .flex_col()
+            .min_h(px(0.))
             .child(
                 TitleBar::new().child(div().child("Settings")).child(
                     div().flex().items_center().gap_2().child(
@@ -174,6 +200,7 @@ impl Render for SettingScreen {
 
 struct PresetListDelegate {
     presets: Vec<Preset>,
+    active_preset_id: Option<i64>,
     selected_index: Option<IndexPath>,
 }
 
@@ -191,8 +218,20 @@ impl ListDelegate for PresetListDelegate {
         _cx: &mut App,
     ) -> Option<Self::Item> {
         self.presets.get(ix.row).map(|preset| {
+            let is_current = Some(preset.id) == self.active_preset_id;
+            let row = div()
+                .flex()
+                .flex_row()
+                .gap_2()
+                .items_center()
+                .when(is_current, |d| {
+                    d.child(Icon::new(IconName::Check).size_4())
+                        .child(div().text_xs().child("Current"))
+                })
+                .child(Label::new(SharedString::from(preset.name.clone())));
+
             ListItem::new(ix)
-                .child(Label::new(SharedString::from(preset.name.clone())))
+                .child(row)
                 .selected(Some(ix) == self.selected_index)
         })
     }
