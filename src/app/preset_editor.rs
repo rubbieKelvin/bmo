@@ -1,6 +1,6 @@
 use gpui::{
-    AppContext, Context, Div, Entity, EventEmitter, ParentElement, Render, SharedString, Styled,
-    Subscription, Window, div, prelude::FluentBuilder, px,
+    AppContext, Context, Div, Entity, EventEmitter, InteractiveElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder, px, rgb,
 };
 use gpui_component::{
     ActiveTheme as _, Disableable, IconName, StyledExt, TitleBar,
@@ -9,22 +9,26 @@ use gpui_component::{
     label::Label,
 };
 
-use crate::db::{Database, Preset, Session, SessionType};
+use crate::db::{Database, Preset, SESSION_PALETTE, Session, SessionType, session_color_for};
 use crate::events::navigation::{NavigationEvent, Screen};
 
 /// Local, editable row backing a `Session`.
 ///
-/// Field edits (name, duration, type) are buffered in the row and only
+/// Field edits (name, duration, type, color) are buffered in the row and only
 /// committed to the database via the "Save preset" button. Structural
 /// changes (add/remove/reorder) remain immediate because they need real
 /// database IDs to stay consistent across the list.
 struct SessionRow {
     id: i64,
     session_type: SessionType,
+    /// `None` means "auto palette by position"; `Some(idx)` picks
+    /// `SESSION_PALETTE[idx % len]`.
+    color: Option<i64>,
     /// Last value committed to the DB. Used to detect dirtiness.
     committed_name: String,
     committed_duration: i64,
     committed_type: SessionType,
+    committed_color: Option<i64>,
     name_state: Entity<InputState>,
     duration_state: Entity<InputState>,
     #[allow(dead_code)]
@@ -37,14 +41,19 @@ pub struct PresetEditorScreen {
     db: Entity<Database>,
     preset_id: i64,
     title_state: Entity<InputState>,
+    description_state: Entity<InputState>,
     /// Last title committed to the DB.
     committed_title: String,
+    /// Last description committed to the DB (empty string when NULL).
+    committed_description: String,
     rows: Vec<SessionRow>,
     missing: bool,
     #[allow(dead_code)]
     _db_obs: Subscription,
     #[allow(dead_code)]
     _title_sub: Subscription,
+    #[allow(dead_code)]
+    _description_sub: Subscription,
 }
 
 impl EventEmitter<NavigationEvent> for PresetEditorScreen {}
@@ -90,10 +99,21 @@ impl PresetEditorScreen {
             .cloned();
 
         let title_initial = preset.as_ref().map(|p| p.name.clone()).unwrap_or_default();
+        let description_initial = preset
+            .as_ref()
+            .and_then(|p| p.description.clone())
+            .unwrap_or_default();
+
         let title_state = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Preset name")
                 .default_value(SharedString::from(title_initial.clone()))
+        });
+
+        let description_state = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Optional description")
+                .default_value(SharedString::from(description_initial.clone()))
         });
 
         let _title_sub = cx.subscribe(&title_state, move |_this, _entity, ev: &InputEvent, cx| {
@@ -101,6 +121,12 @@ impl PresetEditorScreen {
                 cx.notify();
             }
         });
+        let _description_sub =
+            cx.subscribe(&description_state, move |_this, _entity, ev: &InputEvent, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    cx.notify();
+                }
+            });
 
         let rows: Vec<SessionRow> = preset
             .as_ref()
@@ -135,11 +161,14 @@ impl PresetEditorScreen {
             db,
             preset_id,
             title_state,
+            description_state,
             committed_title: title_initial,
+            committed_description: description_initial,
             rows,
             missing: preset.is_none(),
             _db_obs,
             _title_sub,
+            _description_sub,
         }
     }
 
@@ -155,8 +184,6 @@ impl PresetEditorScreen {
                 .default_value(SharedString::from(format_duration(s.duration_in_sec)))
         });
 
-        // Redraw on every keystroke so the "Unsaved changes" indicator and
-        // Save button dirty state stay in sync.
         let _name_sub = cx.subscribe(&name_state, move |_this, _, ev: &InputEvent, cx| {
             if matches!(ev, InputEvent::Change) {
                 cx.notify();
@@ -171,9 +198,11 @@ impl PresetEditorScreen {
         SessionRow {
             id: s.id,
             session_type: s.session_type,
+            color: s.color,
             committed_name: s.name.clone(),
             committed_duration: s.duration_in_sec,
             committed_type: s.session_type,
+            committed_color: s.color,
             name_state,
             duration_state,
             _name_sub,
@@ -190,17 +219,19 @@ impl PresetEditorScreen {
             preset.sessions.iter().map(|s| s.id).collect();
         self.rows.retain(|r| live_ids.contains(&r.id));
 
-        // Refresh "committed" snapshots for rows that already exist so the
-        // dirty check reflects the DB's view of the world after a save.
         for s in preset.sessions.iter() {
             if let Some(r) = self.rows.iter_mut().find(|r| r.id == s.id) {
                 r.committed_name = s.name.clone();
                 r.committed_duration = s.duration_in_sec;
                 r.committed_type = s.session_type;
-                // Only snap `session_type` back to DB truth if user hasn't
-                // changed it locally; otherwise keep their pending toggle.
+                r.committed_color = s.color;
+                // Only snap `session_type`/`color` back to DB truth if user
+                // hasn't changed it locally; otherwise keep their pending edit.
                 if r.session_type == r.committed_type {
                     r.session_type = s.session_type;
+                }
+                if r.color == r.committed_color {
+                    r.color = s.color;
                 }
             }
         }
@@ -218,11 +249,19 @@ impl PresetEditorScreen {
         self.committed_title = preset.name.clone();
         let current_title = self.title_state.read(cx).value().to_string();
         if current_title == self.committed_title {
-            // no-op: user's input already matches what the DB has
+            // user's input already matches
         } else if current_title.is_empty() {
-            // initial load case
             self.title_state.update(cx, |st, cx| {
                 st.set_value(SharedString::from(preset.name.clone()), window, cx);
+            });
+        }
+
+        let db_description = preset.description.clone().unwrap_or_default();
+        self.committed_description = db_description.clone();
+        let current_desc = self.description_state.read(cx).value().to_string();
+        if current_desc.is_empty() && !db_description.is_empty() {
+            self.description_state.update(cx, |st, cx| {
+                st.set_value(SharedString::from(db_description), window, cx);
             });
         }
     }
@@ -234,11 +273,16 @@ impl PresetEditorScreen {
         name != row.committed_name
             || secs != row.committed_duration
             || row.session_type != row.committed_type
+            || row.color != row.committed_color
     }
 
     fn is_dirty(&self, cx: &Context<Self>) -> bool {
         let title = self.title_state.read(cx).value().to_string();
         if title != self.committed_title {
+            return true;
+        }
+        let desc = self.description_state.read(cx).value().to_string();
+        if desc != self.committed_description {
             return true;
         }
         self.rows.iter().any(|r| self.is_row_dirty(r, cx))
@@ -248,12 +292,16 @@ impl PresetEditorScreen {
         let new_title = self.title_state.read(cx).value().to_string();
         let title_changed = new_title != self.committed_title && !new_title.trim().is_empty();
 
+        let new_description = self.description_state.read(cx).value().to_string();
+        let description_changed = new_description != self.committed_description;
+
         #[derive(Clone)]
         struct PendingSession {
             id: i64,
             name: String,
             secs: i64,
             kind: SessionType,
+            color: Option<i64>,
         }
 
         let mut pending: Vec<PendingSession> = Vec::new();
@@ -271,33 +319,45 @@ impl PresetEditorScreen {
                 name,
                 secs,
                 kind: row.session_type,
+                color: row.color,
             });
         }
 
-        if !title_changed && pending.is_empty() {
+        if !title_changed && !description_changed && pending.is_empty() {
             return;
         }
 
         let preset_id = self.preset_id;
+        let new_description_clone = new_description.clone();
         self.db.update(cx, |db, cx| {
             if title_changed {
                 db.rename_preset(preset_id, new_title.clone(), cx);
             }
+            if description_changed {
+                let as_option = if new_description_clone.trim().is_empty() {
+                    None
+                } else {
+                    Some(new_description_clone.clone())
+                };
+                db.set_preset_description(preset_id, as_option, cx);
+            }
             for p in pending.iter() {
-                db.update_session(p.id, p.name.clone(), p.secs, p.kind, cx);
+                db.update_session(p.id, p.name.clone(), p.secs, p.kind, p.color, cx);
             }
         });
 
-        // Optimistically update committed snapshots so the dirty indicator
-        // clears immediately (the DB observer will reconcile shortly too).
         if title_changed {
             self.committed_title = new_title;
+        }
+        if description_changed {
+            self.committed_description = new_description;
         }
         for p in pending {
             if let Some(r) = self.rows.iter_mut().find(|r| r.id == p.id) {
                 r.committed_name = p.name;
                 r.committed_duration = p.secs;
                 r.committed_type = p.kind;
+                r.committed_color = p.color;
             }
         }
         cx.notify();
@@ -308,6 +368,19 @@ impl PresetEditorScreen {
             row.session_type = match row.session_type {
                 SessionType::Focus => SessionType::Break,
                 SessionType::Break => SessionType::Focus,
+            };
+        }
+        cx.notify();
+    }
+
+    /// Cycle the row's color through the palette. `None -> 0 -> 1 -> ... -> None`.
+    fn cycle_row_color(&mut self, id: i64, cx: &mut Context<Self>) {
+        if let Some(row) = self.rows.iter_mut().find(|r| r.id == id) {
+            let len = SESSION_PALETTE.len() as i64;
+            row.color = match row.color {
+                None => Some(0),
+                Some(i) if i + 1 >= len => None,
+                Some(i) => Some(i + 1),
             };
         }
         cx.notify();
@@ -340,8 +413,6 @@ impl PresetEditorScreen {
 
     fn add_session(&mut self, cx: &mut Context<Self>) {
         let preset_id = self.preset_id;
-        // The `observe_in` hook mounted in `new` will rebuild rows (with
-        // InputStates) once `update_preset_list` completes the round-trip.
         self.db.update(cx, |db, cx| {
             db.add_session(
                 preset_id,
@@ -370,8 +441,6 @@ impl PresetEditorScreen {
     }
 
     fn back(&mut self, cx: &mut Context<Self>) {
-        // Persist any pending field edits so the user doesn't lose work when
-        // they navigate back. Structural edits are already committed.
         if self.is_dirty(cx) {
             self.save_all(cx);
         }
@@ -384,6 +453,7 @@ impl PresetEditorScreen {
         let type_label = if is_focus { "Focus" } else { "Break" };
         let last = index + 1 == self.rows.len();
         let row_dirty = self.is_row_dirty(row, cx);
+        let color = session_color_for(row.color, index);
 
         div()
             .flex()
@@ -398,6 +468,27 @@ impl PresetEditorScreen {
             } else {
                 cx.theme().border
             })
+            .child(
+                // Colored swatch that cycles through the palette when clicked.
+                // Auto-picked (None) colors get a dashed outline so users can
+                // tell the difference between "default" and "manually set".
+                div()
+                    .size_6()
+                    .rounded_full()
+                    .bg(rgb(color))
+                    .border_1()
+                    .border_color(if row.color.is_some() {
+                        cx.theme().border
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .on_mouse_up(
+                        gpui::MouseButton::Left,
+                        cx.listener(move |this, _e, _w, cx| {
+                            this.cycle_row_color(id, cx);
+                        }),
+                    ),
+            )
             .child(
                 div()
                     .flex_grow()
@@ -484,6 +575,19 @@ impl PresetEditorScreen {
                     .items_center()
                     .child(Label::new("Name"))
                     .child(div().flex_grow().child(Input::new(&self.title_state))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap_2()
+                    .items_center()
+                    .child(Label::new("About"))
+                    .child(
+                        div()
+                            .flex_grow()
+                            .child(Input::new(&self.description_state).cleanable(true)),
+                    ),
             )
             .child(
                 div()

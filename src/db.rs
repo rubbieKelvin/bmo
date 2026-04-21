@@ -8,6 +8,31 @@ use std::path::{Path, PathBuf};
 
 use crate::session::{SessionKind, TimerPreset};
 
+/// Muted palette used for session coloring. `Session.color` stores an index
+/// into this table; a `None` color means "auto-pick based on list position".
+pub const SESSION_PALETTE: &[u32] = &[
+    0x4C6FA1, // slate blue
+    0x6A8E5A, // moss green
+    0xB07A4A, // amber
+    0xA05878, // dusty rose
+    0x7A6AA1, // soft violet
+    0x5AA1A1, // teal
+    0x8A8A4A, // olive
+    0x7A7A7A, // neutral grey
+];
+
+/// Returns the palette entry for `(color, fallback_index)`. `color` is clamped
+/// to `0..SESSION_PALETTE.len()`; if `None` the fallback cycles through the
+/// palette so each session in a preset gets a distinct hue by default.
+pub fn session_color_for(color: Option<i64>, fallback_index: usize) -> u32 {
+    let len = SESSION_PALETTE.len();
+    let idx = color
+        .and_then(|c| usize::try_from(c).ok())
+        .map(|c| c % len)
+        .unwrap_or(fallback_index % len);
+    SESSION_PALETTE[idx]
+}
+
 fn unix_epoch_naive() -> NaiveDateTime {
     NaiveDate::from_ymd_opt(1970, 1, 1)
         .and_then(|d| d.and_hms_opt(0, 0, 0))
@@ -58,13 +83,6 @@ pub enum SessionType {
 }
 
 impl SessionType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SessionType::Focus => "focus",
-            SessionType::Break => "break",
-        }
-    }
-
     pub fn to_kind(self) -> SessionKind {
         match self {
             SessionType::Focus => SessionKind::WORK,
@@ -83,12 +101,12 @@ impl SessionType {
 #[derive(Debug, Clone)]
 pub struct Session {
     pub id: i64,
-    pub preset_id: i64,
     pub name: String,
     pub duration_in_sec: i64,
+    /// Palette index (0..PALETTE.len()) when set. `None` means "auto-pick a
+    /// color from the built-in palette based on position".
     pub color: Option<i64>,
     pub session_type: SessionType,
-    pub order_index: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +115,6 @@ pub struct Preset {
     pub name: String,
     pub description: Option<String>,
     pub created_date: NaiveDateTime,
-    pub is_deleted: i64,
     pub sessions: Vec<Session>,
 }
 
@@ -112,12 +129,11 @@ impl Preset {
         let sessions: Vec<TimerSession> = self
             .sessions
             .iter()
-            .map(|s| {
-                TimerSession::new(
-                    s.name.clone().into(),
-                    Duration::from_secs(s.duration_in_sec.max(1) as u64),
-                    s.session_type.to_kind(),
-                )
+            .map(|s| TimerSession {
+                title: s.name.clone().into(),
+                duration: Duration::from_secs(s.duration_in_sec.max(1) as u64),
+                kind: s.session_type.to_kind(),
+                color: s.color,
             })
             .collect();
         Some(TimerPreset {
@@ -278,12 +294,6 @@ impl Database {
         cx.notify();
     }
 
-    pub fn clear_active_preset_id(&mut self, cx: &mut Context<Self>) {
-        self.prefs.active_preset_id = None;
-        self.schedule_persist_prefs(cx);
-        cx.notify();
-    }
-
     pub fn set_default_preset_id(&mut self, id: Option<i64>, cx: &mut Context<Self>) {
         self.prefs.default_preset_id = id;
         self.schedule_persist_prefs(cx);
@@ -314,10 +324,6 @@ impl Database {
         cx.notify();
     }
 
-    pub fn schedule_persist_active_preset(&self, cx: &mut Context<Self>) {
-        self.schedule_persist_prefs(cx);
-    }
-
     pub fn schedule_persist_prefs(&self, cx: &mut Context<Self>) {
         let Some(pool) = self.pool() else {
             return;
@@ -342,14 +348,11 @@ impl Database {
             p_name: String,
             p_description: Option<String>,
             p_created_date: String,
-            p_is_deleted: i64,
             s_id: Option<i64>,
-            s_preset_id: Option<i64>,
             s_name: Option<String>,
             s_duration: Option<i64>,
             s_color: Option<i64>,
             s_type: Option<SessionType>,
-            s_order: Option<i64>,
         }
 
         let rows: Vec<Row> = sqlx::query_as(
@@ -359,15 +362,12 @@ impl Database {
                 p.name            AS p_name,
                 p.description     AS p_description,
                 p.created_date    AS p_created_date,
-                p.is_deleted      AS p_is_deleted,
 
                 s.id              AS s_id,
-                s.preset_id       AS s_preset_id,
                 s.name            AS s_name,
                 s.duration_in_sec AS s_duration,
                 s.color           AS s_color,
-                s.type            AS s_type,
-                s.order_index     AS s_order
+                s.type            AS s_type
             FROM presets p
             LEFT JOIN session s ON p.id = s.preset_id
             WHERE p.is_deleted = 0
@@ -389,19 +389,16 @@ impl Database {
                 name: row.p_name.clone(),
                 description: row.p_description.clone(),
                 created_date: parse_sqlite_datetime(&row.p_created_date),
-                is_deleted: row.p_is_deleted,
                 sessions: Vec::new(),
             });
 
             if let Some(s_id) = row.s_id {
                 preset.sessions.push(Session {
                     id: s_id,
-                    preset_id: row.s_preset_id.unwrap_or(row.p_id),
                     name: row.s_name.unwrap_or_default(),
                     duration_in_sec: row.s_duration.unwrap_or(60),
                     color: row.s_color,
                     session_type: row.s_type.unwrap_or(SessionType::Focus),
-                    order_index: row.s_order.unwrap_or(0),
                 });
             }
         }
@@ -498,6 +495,35 @@ impl Database {
                 .await
             {
                 eprintln!("Failed to rename preset: {}", e);
+                return;
+            }
+            if let Some(entity) = entity.upgrade() {
+                let _ = entity.update(cx, |this, cx| this.update_preset_list(cx));
+            }
+        })
+        .detach();
+    }
+
+    pub fn set_preset_description(
+        &self,
+        id: i64,
+        description: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pool) = self.pool() else {
+            return;
+        };
+        let normalized = description
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty());
+        cx.spawn(async move |entity, cx| {
+            if let Err(e) = sqlx::query("UPDATE presets SET description = ? WHERE id = ?")
+                .bind(&normalized)
+                .bind(id)
+                .execute(&pool)
+                .await
+            {
+                eprintln!("Failed to update description: {}", e);
                 return;
             }
             if let Some(entity) = entity.upgrade() {
@@ -635,6 +661,7 @@ impl Database {
         name: String,
         duration_in_sec: i64,
         kind: SessionType,
+        color: Option<i64>,
         cx: &mut Context<Self>,
     ) {
         let Some(pool) = self.pool() else {
@@ -647,11 +674,12 @@ impl Database {
         let duration = duration_in_sec.max(1);
         cx.spawn(async move |entity, cx| {
             if let Err(e) = sqlx::query(
-                "UPDATE session SET name = ?, duration_in_sec = ?, type = ? WHERE id = ?",
+                "UPDATE session SET name = ?, duration_in_sec = ?, type = ?, color = ? WHERE id = ?",
             )
             .bind(&name)
             .bind(duration)
             .bind(kind)
+            .bind(color)
             .bind(id)
             .execute(&pool)
             .await

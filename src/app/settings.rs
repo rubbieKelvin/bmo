@@ -11,6 +11,7 @@ use gpui_component::{
     switch::Switch,
     theme::{Theme, ThemeMode},
 };
+use sqlx::types::chrono::NaiveDateTime;
 
 use crate::db::Database;
 use crate::events::navigation::{NavigationEvent, Screen};
@@ -88,14 +89,36 @@ impl SettingScreen {
         });
     }
 
+    fn toggle_default(&mut self, preset_id: i64, cx: &mut Context<Self>) {
+        let current = self.db.read(cx).prefs().default_preset_id;
+        let next = if current == Some(preset_id) {
+            None
+        } else {
+            Some(preset_id)
+        };
+        self.db.update(cx, |db, cx| db.set_default_preset_id(next, cx));
+    }
+
     fn preset_row(
         &self,
         id: i64,
         name: String,
+        description: Option<String>,
         session_count: usize,
+        created_date: NaiveDateTime,
         is_active: bool,
+        is_default: bool,
         cx: &mut Context<Self>,
     ) -> Div {
+        let subtitle = match description {
+            Some(desc) if !desc.trim().is_empty() => desc,
+            _ => format!(
+                "{} session{} · Created {}",
+                session_count,
+                if session_count == 1 { "" } else { "s" },
+                created_date.format("%b %-d, %Y")
+            ),
+        };
         div()
             .flex()
             .flex_row()
@@ -112,17 +135,40 @@ impl SettingScreen {
                     .flex()
                     .flex_col()
                     .flex_grow()
-                    .child(Label::new(SharedString::from(name)))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .gap_2()
+                            .items_center()
+                            .child(Label::new(SharedString::from(name)))
+                            .when(is_default, |d| {
+                                d.child(
+                                    div()
+                                        .text_xs()
+                                        .px_1()
+                                        .rounded_sm()
+                                        .bg(cx.theme().accent)
+                                        .text_color(cx.theme().accent_foreground)
+                                        .child("Default"),
+                                )
+                            }),
+                    )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!(
-                                "{} session{}",
-                                session_count,
-                                if session_count == 1 { "" } else { "s" }
-                            )),
+                            .child(subtitle),
                     ),
+            )
+            .child(
+                Button::new(("default", id as usize))
+                    .label(if is_default { "Unset default" } else { "Set default" })
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _e, _w, cx| {
+                        this.toggle_default(id, cx);
+                    })),
             )
             .child(
                 Button::new(("use", id as usize))
@@ -149,17 +195,43 @@ impl SettingScreen {
         // Snapshot the data we need so we don't hold a DB borrow across the
         // listener-building loop.
         let active = self.db.read(cx).active_preset_id();
-        let preset_infos: Vec<(i64, String, usize)> = self
+        let default_id = self.db.read(cx).prefs().default_preset_id;
+        let preset_infos: Vec<(
+            i64,
+            String,
+            Option<String>,
+            usize,
+            NaiveDateTime,
+        )> = self
             .db
             .read(cx)
             .presets()
             .iter()
-            .map(|p| (p.id, p.name.clone(), p.sessions.len()))
+            .map(|p| {
+                (
+                    p.id,
+                    p.name.clone(),
+                    p.description.clone(),
+                    p.sessions.len(),
+                    p.created_date,
+                )
+            })
             .collect();
 
         let rows: Vec<Div> = preset_infos
             .into_iter()
-            .map(|(id, name, count)| self.preset_row(id, name, count, Some(id) == active, cx))
+            .map(|(id, name, desc, count, created)| {
+                self.preset_row(
+                    id,
+                    name,
+                    desc,
+                    count,
+                    created,
+                    Some(id) == active,
+                    Some(id) == default_id,
+                    cx,
+                )
+            })
             .collect();
 
         div()
