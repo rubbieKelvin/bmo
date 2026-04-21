@@ -1,27 +1,25 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, AppContext, Context, Div, Entity, EventEmitter, ParentElement, Render, SharedString, Styled,
-    Subscription, Window, div, px,
+    App, AppContext, Context, Div, Entity, EventEmitter, ParentElement, Render, SharedString,
+    Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, IndexPath, TitleBar,
+    ActiveTheme as _, Icon, IconName, Sizable, StyledExt, TitleBar,
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
     label::Label,
-    list::{ListDelegate, ListEvent, ListItem, ListState},
+    switch::Switch,
+    theme::{Theme, ThemeMode},
 };
 
-use crate::db::{Database, Preset};
+use crate::db::Database;
 use crate::events::navigation::{NavigationEvent, Screen};
 
 pub struct SettingScreen {
-    pub preset_list: Entity<ListState<PresetListDelegate>>,
     db: Entity<Database>,
     new_preset_name: Entity<InputState>,
     #[allow(dead_code)]
     _db_obs: Subscription,
-    #[allow(dead_code)]
-    _list_sub: Subscription,
     #[allow(dead_code)]
     _name_input_sub: Subscription,
 }
@@ -30,65 +28,24 @@ impl EventEmitter<NavigationEvent> for SettingScreen {}
 
 impl SettingScreen {
     pub fn new(cx: &mut Context<Self>, window: &mut Window, db: Entity<Database>) -> Self {
-        let presets = db.read(cx).presets().to_vec();
-        let active_preset_id = db.read(cx).active_preset_id();
+        let new_preset_name =
+            cx.new(|cx| InputState::new(window, cx).placeholder("New preset name"));
 
-        let preset_list = cx.new(|cx| {
-            ListState::new(
-                PresetListDelegate {
-                    presets,
-                    active_preset_id,
-                    selected_index: None,
-                },
-                window,
-                cx,
-            )
+        let _db_obs = cx.observe(&db, |_this, _db_ent, cx| {
+            cx.notify();
         });
 
-        let new_preset_name = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("New preset name")
-        });
-
-        let _db_obs = cx.observe(&db, |this, _, cx| {
-            let presets = this.db.read(cx).presets().to_vec();
-            let active_preset_id = this.db.read(cx).active_preset_id();
-            this.preset_list.update(cx, |list, cx| {
-                let d = list.delegate_mut();
-                d.presets = presets;
-                d.active_preset_id = active_preset_id;
-                cx.notify();
-            });
-        });
-
-        let _list_sub = cx.subscribe(&preset_list, |this, list, event, cx| {
-            if let ListEvent::Confirm(ix) = event {
-                if let Some(p) = list.read(cx).delegate().presets.get(ix.row).cloned() {
-                    if let Some(tp) = p.to_timer_preset() {
-                        this.db.update(cx, |db, cx| {
-                            db.set_active_preset_id(p.id);
-                            db.schedule_persist_active_preset(cx);
-                        });
-                        cx.emit(NavigationEvent {
-                            screen: Screen::Timer,
-                            timer_preset: Some(tp),
-                        });
-                    }
+        let _name_input_sub =
+            cx.subscribe_in(&new_preset_name, window, |this, _, ev, window, cx| {
+                if matches!(ev, InputEvent::PressEnter { .. }) {
+                    this.submit_new_preset(window, cx);
                 }
-            }
-        });
-
-        let _name_input_sub = cx.subscribe_in(&new_preset_name, window, |this, _, ev, window, cx| {
-            if matches!(ev, InputEvent::PressEnter { .. }) {
-                this.submit_new_preset(window, cx);
-            }
-        });
+            });
 
         SettingScreen {
-            preset_list,
             db,
             new_preset_name,
             _db_obs,
-            _list_sub,
             _name_input_sub,
         }
     }
@@ -103,24 +60,120 @@ impl SettingScreen {
         });
     }
 
+    fn use_preset(&mut self, preset_id: i64, cx: &mut Context<Self>) {
+        let preset = self
+            .db
+            .read(cx)
+            .presets()
+            .iter()
+            .find(|p| p.id == preset_id)
+            .cloned();
+        let Some(p) = preset else {
+            return;
+        };
+        let tp = p.to_timer_preset();
+        self.db.update(cx, |db, cx| {
+            db.set_active_preset_id(p.id);
+            db.schedule_persist_active_preset(cx);
+        });
+        cx.emit(NavigationEvent {
+            screen: Screen::Timer,
+            timer_preset: tp,
+        });
+    }
+
+    fn edit_preset(&mut self, preset_id: i64, cx: &mut Context<Self>) {
+        cx.emit(NavigationEvent {
+            screen: Screen::PresetEditor(preset_id),
+            timer_preset: None,
+        });
+    }
+
+    fn preset_row(
+        &self,
+        id: i64,
+        name: String,
+        session_count: usize,
+        is_active: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .flex()
+            .flex_row()
+            .gap_2()
+            .items_center()
+            .w_full()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .when(is_active, |d| d.child(Icon::new(IconName::Check).size_4()))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_grow()
+                    .child(Label::new(SharedString::from(name)))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!(
+                                "{} session{}",
+                                session_count,
+                                if session_count == 1 { "" } else { "s" }
+                            )),
+                    ),
+            )
+            .child(
+                Button::new(("use", id as usize))
+                    .label(if is_active { "In use" } else { "Use" })
+                    .when(!is_active, |b| b.primary())
+                    .when(is_active, |b| b.ghost())
+                    .small()
+                    .on_click(cx.listener(move |this, _e, _w, cx| {
+                        this.use_preset(id, cx);
+                    })),
+            )
+            .child(
+                Button::new(("edit", id as usize))
+                    .label("Edit")
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _e, _w, cx| {
+                        this.edit_preset(id, cx);
+                    })),
+            )
+    }
+
     fn presets_section(&self, cx: &mut Context<Self>) -> Div {
+        // Snapshot the data we need so we don't hold a DB borrow across the
+        // listener-building loop.
+        let active = self.db.read(cx).active_preset_id();
+        let preset_infos: Vec<(i64, String, usize)> = self
+            .db
+            .read(cx)
+            .presets()
+            .iter()
+            .map(|p| (p.id, p.name.clone(), p.sessions.len()))
+            .collect();
+
+        let rows: Vec<Div> = preset_infos
+            .into_iter()
+            .map(|(id, name, count)| self.preset_row(id, name, count, Some(id) == active, cx))
+            .collect();
+
         div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .child(Label::new("Presets")),
-            )
+            .child(Label::new("Presets"))
             .child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
                     .child(
-                        "Name your preset, then press Add or Enter (classic Pomodoro segments). Tap a row to set it as the timer preset and return to the timer.",
+                        "Use runs the preset now. The pencil icon opens the session editor.",
                     ),
             )
             .child(
@@ -139,32 +192,147 @@ impl SettingScreen {
                             })),
                     ),
             )
+            .child(div().flex().flex_col().gap_2().children(rows))
+    }
+
+    fn general_section(&self, cx: &mut Context<Self>) -> Div {
+        let prefs = self.db.read(cx).prefs().clone();
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .pt_2()
+            .child(Label::new("General"))
+            .child(self.toggle_row(
+                "auto-advance",
+                "Auto-advance segments",
+                "Start the next session automatically when a segment finishes.",
+                prefs.auto_advance,
+                cx.listener(|this, v: &bool, _w, cx| {
+                    let v = *v;
+                    this.db.update(cx, |db, cx| db.set_auto_advance(v, cx));
+                }),
+                cx,
+            ))
+            .child(self.toggle_row(
+                "notifications-enabled",
+                "Desktop notifications",
+                "Show an OS notification on segment completion.",
+                prefs.notifications_enabled,
+                cx.listener(|this, v: &bool, _w, cx| {
+                    let v = *v;
+                    this.db
+                        .update(cx, |db, cx| db.set_notifications_enabled(v, cx));
+                }),
+                cx,
+            ))
+            .child(self.toggle_row(
+                "sounds-enabled",
+                "Sound cues",
+                "Play a short sound on segment completion.",
+                prefs.sounds_enabled,
+                cx.listener(|this, v: &bool, _w, cx| {
+                    let v = *v;
+                    this.db.update(cx, |db, cx| db.set_sounds_enabled(v, cx));
+                }),
+                cx,
+            ))
+            .child(self.theme_row(&prefs.theme, cx))
+    }
+
+    fn toggle_row<F>(
+        &self,
+        id: &'static str,
+        title: &'static str,
+        subtitle: &'static str,
+        checked: bool,
+        on_change: F,
+        cx: &mut Context<Self>,
+    ) -> Div
+    where
+        F: Fn(&bool, &mut Window, &mut App) + 'static,
+    {
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .py_1()
+            .child(
+                div()
+                    .flex_grow()
+                    .flex()
+                    .flex_col()
+                    .child(Label::new(title))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(subtitle),
+                    ),
+            )
+            .child(Switch::new(id).checked(checked).on_click(on_change))
+    }
+
+    fn theme_row(&self, current_theme: &str, cx: &mut Context<Self>) -> Div {
+        let is_dark = current_theme == "dark";
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .py_1()
+            .child(Label::new("Theme"))
             .child(
                 div()
                     .flex()
-                    .flex_col()
+                    .flex_row()
                     .gap_1()
-                    .flex_grow()
-                    .min_h(px(0.))
-                    .child(Label::new("Your presets"))
                     .child(
-                        div()
-                            .flex_grow()
-                            .min_h(px(160.))
-                            .child(self.preset_list.clone()),
+                        Button::new("theme-light")
+                            .icon(IconName::Sun)
+                            .label("Light")
+                            .when(!is_dark, |b| b.primary())
+                            .when(is_dark, |b| b.ghost())
+                            .on_click(cx.listener(|this, _e, window, cx| {
+                                Theme::change(ThemeMode::Light, Some(window), cx);
+                                this.db
+                                    .update(cx, |db, cx| db.set_theme("light".into(), cx));
+                            })),
+                    )
+                    .child(
+                        Button::new("theme-dark")
+                            .icon(IconName::Moon)
+                            .label("Dark")
+                            .when(is_dark, |b| b.primary())
+                            .when(!is_dark, |b| b.ghost())
+                            .on_click(cx.listener(|this, _e, window, cx| {
+                                Theme::change(ThemeMode::Dark, Some(window), cx);
+                                this.db
+                                    .update(cx, |db, cx| db.set_theme("dark".into(), cx));
+                            })),
                     ),
             )
     }
 
     fn body(&self, cx: &mut Context<Self>) -> Div {
         div()
-            .p_2()
-            .flex()
-            .flex_col()
-            .gap_4()
             .flex_grow()
             .min_h(px(0.))
-            .child(self.presets_section(cx).flex_grow())
+            .child(
+                div()
+                    .p_3()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .size_full()
+                    .scrollable(gpui_component::scroll::ScrollbarAxis::Vertical)
+                    .child(self.presets_section(cx))
+                    .child(self.general_section(cx)),
+            )
     }
 }
 
@@ -182,8 +350,8 @@ impl Render for SettingScreen {
             .child(
                 TitleBar::new().child(div().child("Settings")).child(
                     div().flex().items_center().gap_2().child(
-                        Button::new("settings")
-                            .icon(Icon::new(Icon::empty()).path("icons/x.svg"))
+                        Button::new("settings-close")
+                            .icon(IconName::Close)
                             .ghost()
                             .on_click(cx.listener(|_, _, _, cx| {
                                 cx.emit(NavigationEvent {
@@ -195,54 +363,5 @@ impl Render for SettingScreen {
                 ),
             )
             .child(self.body(cx).flex_grow())
-    }
-}
-
-struct PresetListDelegate {
-    presets: Vec<Preset>,
-    active_preset_id: Option<i64>,
-    selected_index: Option<IndexPath>,
-}
-
-impl ListDelegate for PresetListDelegate {
-    type Item = ListItem;
-
-    fn items_count(&self, _section: usize, _cx: &App) -> usize {
-        self.presets.len()
-    }
-
-    fn render_item(
-        &self,
-        ix: IndexPath,
-        _window: &mut Window,
-        _cx: &mut App,
-    ) -> Option<Self::Item> {
-        self.presets.get(ix.row).map(|preset| {
-            let is_current = Some(preset.id) == self.active_preset_id;
-            let row = div()
-                .flex()
-                .flex_row()
-                .gap_2()
-                .items_center()
-                .when(is_current, |d| {
-                    d.child(Icon::new(IconName::Check).size_4())
-                        .child(div().text_xs().child("Current"))
-                })
-                .child(Label::new(SharedString::from(preset.name.clone())));
-
-            ListItem::new(ix)
-                .child(row)
-                .selected(Some(ix) == self.selected_index)
-        })
-    }
-
-    fn set_selected_index(
-        &mut self,
-        ix: Option<IndexPath>,
-        _window: &mut Window,
-        cx: &mut Context<ListState<Self>>,
-    ) {
-        self.selected_index = ix;
-        cx.notify();
     }
 }

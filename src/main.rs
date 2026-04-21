@@ -4,10 +4,12 @@ use gpui_component::{Root, TitleBar};
 
 mod app;
 mod assets;
+mod audio;
 mod components;
 mod constants;
 mod db;
 mod events;
+mod notifications;
 mod session;
 
 fn window_options(cx: &App) -> WindowOptions {
